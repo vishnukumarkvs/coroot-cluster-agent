@@ -2,12 +2,13 @@ package aws
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/rds"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/coroot/logparser"
 	"k8s.io/klog"
 )
@@ -58,7 +59,8 @@ func (r *LogReader) refresh(init bool) bool {
 	defer func() {
 		klog.Infoln("refreshed in", time.Since(t).Truncate(time.Millisecond))
 	}()
-	res, err := rds.New(r.discoverer).DescribeDBLogFiles(&rds.DescribeDBLogFilesInput{DBInstanceIdentifier: r.instanceId})
+	svc := rds.NewFromConfig(r.discoverer.aws)
+	res, err := svc.DescribeDBLogFiles(context.Background(), &rds.DescribeDBLogFilesInput{DBInstanceIdentifier: r.instanceId})
 	if err != nil {
 		klog.Warning("failed to describe log files:", err)
 		r.discoverer.registerError(err)
@@ -66,7 +68,7 @@ func (r *LogReader) refresh(init bool) bool {
 	}
 	seenLogs := map[string]bool{}
 	for _, f := range res.DescribeDBLogFiles {
-		fileName := aws.StringValue(f.LogFileName)
+		fileName := aws.ToString(f.LogFileName)
 		seenLogs[fileName] = true
 		meta := r.logs[fileName]
 		if meta == nil {
@@ -82,12 +84,12 @@ func (r *LogReader) refresh(init bool) bool {
 				klog.Warning(err)
 				continue
 			}
-			meta.lastWritten = aws.Int64Value(f.LastWritten)
-			meta.marker = aws.StringValue(response.Marker)
+			meta.lastWritten = aws.ToInt64(f.LastWritten)
+			meta.marker = aws.ToString(response.Marker)
 			continue
 		}
 
-		if meta.lastWritten >= aws.Int64Value(f.LastWritten) {
+		if meta.lastWritten >= aws.ToInt64(f.LastWritten) {
 			continue
 		}
 		response, err := r.download(fileName, &meta.marker, nil)
@@ -95,8 +97,8 @@ func (r *LogReader) refresh(init bool) bool {
 			klog.Warning(err)
 			continue
 		}
-		meta.lastWritten = aws.Int64Value(f.LastWritten)
-		meta.marker = aws.StringValue(response.Marker)
+		meta.lastWritten = aws.ToInt64(f.LastWritten)
+		meta.marker = aws.ToString(response.Marker)
 		r.write(response.LogFileData)
 	}
 
@@ -113,9 +115,13 @@ func (r *LogReader) download(logFileName string, marker *string, numberOfLines *
 		DBInstanceIdentifier: r.instanceId,
 		LogFileName:          &logFileName,
 		Marker:               marker,
-		NumberOfLines:        numberOfLines,
 	}
-	response, err := rds.New(r.discoverer).DownloadDBLogFilePortion(&request)
+	if numberOfLines != nil {
+		n := int32(*numberOfLines)
+		request.NumberOfLines = &n
+	}
+	svc := rds.NewFromConfig(r.discoverer.aws)
+	response, err := svc.DownloadDBLogFilePortion(context.Background(), &request)
 	if err != nil {
 		return nil, fmt.Errorf(`failed to download file %s: %s`, logFileName, err)
 	}
@@ -123,7 +129,7 @@ func (r *LogReader) download(logFileName string, marker *string, numberOfLines *
 }
 
 func (r *LogReader) write(data *string) {
-	reader := bufio.NewReader(strings.NewReader(aws.StringValue(data)))
+	reader := bufio.NewReader(strings.NewReader(aws.ToString(data)))
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
