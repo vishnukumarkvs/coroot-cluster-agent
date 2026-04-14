@@ -12,19 +12,26 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.32.0"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog"
 )
 
 type EventsLogger struct {
-	logger log.Logger
+	logger   log.Logger
+	endpoint string
 }
 
 func NewEventsLogger() *EventsLogger {
+	endpoint := (*flags.CorootURL).JoinPath("/v1/logs").String()
+	klog.Infof("K8S: initializing EventsLogger for endpoint %s", endpoint)
 	opts := []otlploghttp.Option{
-		otlploghttp.WithEndpointURL((*flags.CorootURL).JoinPath("/v1/logs").String()),
+		otlploghttp.WithEndpointURL(endpoint),
 		otlploghttp.WithHeaders(common.AuthHeaders(*flags.APIKey)),
 		otlploghttp.WithTLSClientConfig(common.TlsConfig()),
 	}
-	exporter, _ := otlploghttp.New(context.Background(), opts...)
+	exporter, err := otlploghttp.New(context.Background(), opts...)
+	if err != nil {
+		klog.Errorf("K8S: failed to create OTLP exporter: %v", err)
+	}
 	batcher := sdk.NewBatchProcessor(exporter)
 	provider := sdk.NewLoggerProvider(
 		sdk.WithProcessor(batcher),
@@ -32,10 +39,14 @@ func NewEventsLogger() *EventsLogger {
 			semconv.ServiceName("KubernetesEvents"),
 		)),
 	)
-	return &EventsLogger{logger: provider.Logger("coroot-cluster-agent")}
+	return &EventsLogger{
+		logger:   provider.Logger("coroot-cluster-agent"),
+		endpoint: endpoint,
+	}
 }
 
 func (l *EventsLogger) EmitEvent(event *corev1.Event) {
+	klog.Infof("K8S: emitting event %s/%s to %s", event.Namespace, event.Name, l.endpoint)
 	record := log.Record{}
 	ts := event.LastTimestamp.Time
 	if ts.IsZero() {

@@ -14,6 +14,7 @@ import (
 )
 
 func TlsConfig() *tls.Config {
+	klog.Infof("TLS: creating config with InsecureSkipVerify=%v, CAFile=%s", *flags.InsecureSkipVerify, *flags.CAFile)
 	cfg := &tls.Config{InsecureSkipVerify: *flags.InsecureSkipVerify}
 	if *flags.CAFile != "" {
 		ca, err := os.ReadFile(*flags.CAFile)
@@ -30,6 +31,7 @@ func TlsConfig() *tls.Config {
 			klog.Fatalf("failed to parse CA from %s", *flags.CAFile)
 		}
 		cfg.RootCAs = pool
+		klog.Infof("TLS: successfully loaded CA from %s", *flags.CAFile)
 	}
 	return cfg
 }
