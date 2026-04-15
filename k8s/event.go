@@ -12,15 +12,18 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.32.0"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 )
 
 type EventsLogger struct {
-	logger log.Logger
+	logger   log.Logger
+	endpoint string
 }
 
 func NewEventsLogger() *EventsLogger {
+	endpoint := (*flags.CorootURL).JoinPath("/v1/logs").String()
 	opts := []otlploghttp.Option{
-		otlploghttp.WithEndpointURL((*flags.CorootURL).JoinPath("/v1/logs").String()),
+		otlploghttp.WithEndpointURL(endpoint),
 		otlploghttp.WithHeaders(common.AuthHeaders(*flags.APIKey)),
 		otlploghttp.WithTLSClientConfig(common.TlsConfig()),
 	}
@@ -32,7 +35,7 @@ func NewEventsLogger() *EventsLogger {
 			semconv.ServiceName("KubernetesEvents"),
 		)),
 	)
-	return &EventsLogger{logger: provider.Logger("coroot-cluster-agent")}
+	return &EventsLogger{logger: provider.Logger("coroot-cluster-agent"), endpoint: endpoint}
 }
 
 func (l *EventsLogger) EmitEvent(event *corev1.Event) {
@@ -63,5 +66,6 @@ func (l *EventsLogger) EmitEvent(event *corev1.Event) {
 		log.String("source.component", event.Source.Component),
 		log.String("source.host", event.Source.Host),
 	)
+	klog.Infof("new kubernetes event: endpoint=%s namespace=%s name=%s reason=%s type=%s", l.endpoint, event.Namespace, event.Name, event.Reason, event.Type)
 	l.logger.Emit(context.TODO(), record)
 }
