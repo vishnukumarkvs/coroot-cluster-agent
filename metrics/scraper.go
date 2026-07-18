@@ -42,7 +42,10 @@ func (ms *Metrics) runScraper() error {
 			RemoteTimeout: model.Duration(RemoteWriteTimeout),
 			QueueConfig:   config.DefaultQueueConfig,
 			HTTPClientConfig: promCommon.HTTPClientConfig{
-				TLSConfig: promCommon.TLSConfig{InsecureSkipVerify: *flags.InsecureSkipVerify},
+				TLSConfig: promCommon.TLSConfig{
+					InsecureSkipVerify: *flags.InsecureSkipVerify,
+					CAFile:             *flags.CAFile,
+				},
 			},
 		},
 	)
@@ -66,6 +69,12 @@ func (ms *Metrics) runScraper() error {
 		EnableCompression:       false,
 		ServiceDiscoveryConfigs: []discovery.Config{
 			discovery.StaticConfig{{Targets: targets}},
+		},
+		MetricRelabelConfigs: []*relabel.Config{
+			{
+				Regex:  relabel.MustNewRegexp("customresource_(group|kind|version)"),
+				Action: relabel.LabelDrop,
+			},
 		},
 	})
 	if k8sCfg := k8sDiscovery(); k8sCfg != nil {
