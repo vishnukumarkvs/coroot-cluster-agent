@@ -8,7 +8,7 @@ import (
 
 	"github.com/coroot/coroot-cluster-agent/common"
 	"github.com/coroot/coroot-cluster-agent/flags"
-	"github.com/go-kit/log/level"
+	remoteapi "github.com/prometheus/client_golang/exp/api/remote"
 	"github.com/prometheus/client_golang/prometheus"
 	promCommon "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
@@ -31,16 +31,17 @@ const (
 )
 
 func (ms *Metrics) runScraper() error {
-	logger := level.NewFilter(Logger{}, level.AllowInfo())
+	logger := NewLogger()
 	cfg := config.DefaultConfig
 	cfg.GlobalConfig.ScrapeInterval = model.Duration(ms.scrapeInterval)
 	cfg.GlobalConfig.ScrapeTimeout = model.Duration(ms.scrapeTimeout)
 	cfg.RemoteWriteConfigs = append(cfg.RemoteWriteConfigs,
 		&config.RemoteWriteConfig{
-			URL:           &promCommon.URL{URL: ms.endpoint},
-			Headers:       common.AuthHeaders(ms.apiKey),
-			RemoteTimeout: model.Duration(RemoteWriteTimeout),
-			QueueConfig:   config.DefaultQueueConfig,
+			URL:             &promCommon.URL{URL: ms.endpoint},
+			Headers:         common.AuthHeaders(ms.apiKey),
+			RemoteTimeout:   model.Duration(RemoteWriteTimeout),
+			ProtobufMessage: remoteapi.WriteV1MessageType,
+			QueueConfig:     config.DefaultQueueConfig,
 			HTTPClientConfig: promCommon.HTTPClientConfig{
 				TLSConfig: promCommon.TLSConfig{
 					InsecureSkipVerify: *flags.InsecureSkipVerify,
@@ -60,13 +61,14 @@ func (ms *Metrics) runScraper() error {
 		})
 	}
 
+	alwaysScrapeClassicHistograms := true
 	cfg.ScrapeConfigs = append(cfg.ScrapeConfigs, &config.ScrapeConfig{
-		JobName:                 jobName,
-		HonorLabels:             true,
-		ScrapeClassicHistograms: true,
-		MetricsPath:             "/metrics",
-		Scheme:                  "http",
-		EnableCompression:       false,
+		JobName:                       jobName,
+		HonorLabels:                   true,
+		AlwaysScrapeClassicHistograms: &alwaysScrapeClassicHistograms,
+		MetricsPath:                   "/metrics",
+		Scheme:                        "http",
+		EnableCompression:             false,
 		ServiceDiscoveryConfigs: []discovery.Config{
 			discovery.StaticConfig{{Targets: targets}},
 		},
@@ -82,9 +84,19 @@ func (ms *Metrics) runScraper() error {
 		cfg.ScrapeConfigs = append(cfg.ScrapeConfigs, k8sCfg)
 	}
 
+	// cfg is built by hand above rather than via config.Load()/LoadFile(), so its
+	// unexported "loaded" flag is never set. Since Prometheus 0.311, GetScrapeConfigs
+	// refuses to run on a config that wasn't loaded that way, so round-trip cfg through
+	// Load() (the only public way to set that flag) before using it any further.
+	loadedCfg, err := config.Load(cfg.String(), logger)
+	if err != nil {
+		return err
+	}
+	cfg = *loadedCfg
+
 	localStorage := &readyStorage{stats: tsdb.NewDBStats()}
 	scraper := &readyScrapeManager{}
-	remoteStorage := remote.NewStorage(logger, prometheus.DefaultRegisterer, localStorage.StartTime, ms.walDir, RemoteFlushDeadline, scraper)
+	remoteStorage := remote.NewStorage(logger, prometheus.DefaultRegisterer, localStorage.StartTime, ms.walDir, RemoteFlushDeadline, scraper, false)
 	fanoutStorage := storage.NewFanout(logger, localStorage, remoteStorage)
 
 	if err := remoteStorage.ApplyConfig(&cfg); err != nil {
@@ -116,7 +128,7 @@ func (ms *Metrics) runScraper() error {
 		}
 	}()
 
-	scrapeManager, err := scrape.NewManager(nil, logger, fanoutStorage, prometheus.DefaultRegisterer)
+	scrapeManager, err := scrape.NewManager(nil, logger, nil, nil, fanoutStorage, prometheus.DefaultRegisterer)
 	if err != nil {
 		return err
 	}
@@ -144,13 +156,14 @@ func k8sDiscovery() *config.ScrapeConfig {
 		klog.Infoln("not in k8s cluster, disabling k8s service discovery")
 		return nil
 	}
+	alwaysScrapeClassicHistograms := true
 	return &config.ScrapeConfig{
-		JobName:                 "custom-metrics-k8s-pods",
-		HonorLabels:             true,
-		ScrapeClassicHistograms: true,
-		MetricsPath:             "/metrics",
-		Scheme:                  "http",
-		EnableCompression:       false,
+		JobName:                       "custom-metrics-k8s-pods",
+		HonorLabels:                   true,
+		AlwaysScrapeClassicHistograms: &alwaysScrapeClassicHistograms,
+		MetricsPath:                   "/metrics",
+		Scheme:                        "http",
+		EnableCompression:             false,
 		RelabelConfigs: []*relabel.Config{
 			{
 				SourceLabels: model.LabelNames{"__meta_kubernetes_pod_annotation_coroot_com_scrape_metrics"},
@@ -200,10 +213,14 @@ func k8sDiscovery() *config.ScrapeConfig {
 			},
 		},
 		ServiceDiscoveryConfigs: []discovery.Config{
-			&kubernetes.SDConfig{
-				Role:      kubernetes.RolePod,
-				Selectors: []kubernetes.SelectorConfig{{Role: "pod"}},
-			},
+			k8sSDConfig(),
 		},
 	}
+}
+
+func k8sSDConfig() *kubernetes.SDConfig {
+	sd := kubernetes.DefaultSDConfig
+	sd.Role = kubernetes.RolePod
+	sd.Selectors = []kubernetes.SelectorConfig{{Role: "pod"}}
+	return &sd
 }
