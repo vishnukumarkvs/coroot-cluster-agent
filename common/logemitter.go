@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/coroot/logparser"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	sdk "go.opentelemetry.io/otel/sdk/log"
 	semconv "go.opentelemetry.io/otel/semconv/v1.32.0"
@@ -38,12 +39,12 @@ func (e *LogEmitter) Callback() logparser.OnMsgCallbackF {
 		record.SetTimestamp(ts)
 		record.SetSeverityText(level.String())
 		record.SetSeverity(severity(level))
-		record.SetBody(log.StringValue(msg))
+		record.SetBody(attribute.StringValue(msg))
 		if patternHash != "" {
-			record.AddAttributes(log.String("pattern.hash", patternHash))
+			record.AddAttributes(attribute.String("pattern.hash", patternHash))
 		}
 		for k, v := range attributes {
-			record.AddAttributes(log.String(k, v))
+			record.AddAttributes(attribute.String(k, v))
 		}
 		e.logger.Emit(context.TODO(), record)
 	}
