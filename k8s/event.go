@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/coroot/coroot-cluster-agent/common"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -38,16 +39,16 @@ func (l *EventsLogger) EmitEvent(event *corev1.Event) {
 	case corev1.EventTypeWarning:
 		record.SetSeverity(log.SeverityWarn)
 	}
-	record.SetBody(log.StringValue(event.Message))
+	record.SetBody(attribute.StringValue(event.Message))
 	record.AddAttributes(
-		log.String("event.name", event.Name),
-		log.String("event.namespace", event.Namespace),
-		log.String("event.reason", event.Reason),
-		log.String("object.kind", event.InvolvedObject.Kind),
-		log.String("object.name", event.InvolvedObject.Name),
-		log.String("object.namespace", event.InvolvedObject.Namespace),
-		log.String("source.component", event.Source.Component),
-		log.String("source.host", event.Source.Host),
+		attribute.String("event.name", event.Name),
+		attribute.String("event.namespace", event.Namespace),
+		attribute.String("event.reason", event.Reason),
+		attribute.String("object.kind", event.InvolvedObject.Kind),
+		attribute.String("object.name", event.InvolvedObject.Name),
+		attribute.String("object.namespace", event.InvolvedObject.Namespace),
+		attribute.String("source.component", event.Source.Component),
+		attribute.String("source.host", event.Source.Host),
 	)
 	l.logger.Emit(context.TODO(), record)
 }
