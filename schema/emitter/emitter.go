@@ -68,13 +68,13 @@ func (e *Emitter) EmitChange(change schema.Change, dbSystem, targetAddr string) 
 	record.SetTimestamp(time.Now())
 	record.SetSeverity(log.SeverityInfo)
 	record.SetSeverityText("Info")
-	record.SetBody(log.StringValue(change.Diff))
+	record.SetBody(attribute.StringValue(change.Diff))
 	record.AddAttributes(
-		log.String("db.system", dbSystem),
-		log.String("db.target", targetAddr),
-		log.String("db.name", change.Database),
-		log.String("db_change.object", change.Object),
-		log.String("db_change.type", change.Type),
+		attribute.String("db.system", dbSystem),
+		attribute.String("db.target", targetAddr),
+		attribute.String("db.name", change.Database),
+		attribute.String("db_change.object", change.Object),
+		attribute.String("db_change.type", change.Type),
 	)
 	e.logger.Emit(context.TODO(), record)
 }
