@@ -44,21 +44,21 @@ func (e *Emitter) EmitSchema(rec schema.TableRecord, dbSystem, targetAddr string
 	if len(ddl) > maxDDLSize {
 		ddl = truncateUTF8(ddl, maxDDLSize) + "\n-- truncated\n"
 	}
-	record.SetBody(log.StringValue(ddl))
+	record.SetBody(attribute.StringValue(ddl))
 	record.AddAttributes(
-		log.String("db.system", dbSystem),
-		log.String("db.target", targetAddr),
-		log.String("db.name", rec.Key.DB),
-		log.String(schema.AttrTable, rec.Key.Table),
+		attribute.String("db.system", dbSystem),
+		attribute.String("db.target", targetAddr),
+		attribute.String("db.name", rec.Key.DB),
+		attribute.String(schema.AttrTable, rec.Key.Table),
 	)
 	if rec.Key.Schema != "" {
-		record.AddAttributes(log.String(schema.AttrSchema, rec.Key.Schema))
+		record.AddAttributes(attribute.String(schema.AttrSchema, rec.Key.Schema))
 	}
 	if rec.Dropped {
-		record.AddAttributes(log.String(schema.AttrDropped, "true"))
+		record.AddAttributes(attribute.String(schema.AttrDropped, "true"))
 	}
 	for k, v := range rec.Stats {
-		record.AddAttributes(log.String(k, v))
+		record.AddAttributes(attribute.String(k, v))
 	}
 	e.schemaLogger.Emit(context.TODO(), record)
 }
